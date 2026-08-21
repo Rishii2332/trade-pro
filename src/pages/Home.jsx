@@ -1,8 +1,4 @@
 import { useEffect, useState } from "react";
-
-import {
-    getQuotes
-} from "../services/marketService";
 import { useNavigate } from "react-router-dom";
 import { getQuote } from "../services/marketService";
 import {

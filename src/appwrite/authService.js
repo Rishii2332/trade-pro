@@ -2,7 +2,7 @@ const API_KEY = import.meta.env.VITE_TWELVE_DATA_API_KEY;
 
 const BASE_URL = "https://api.twelvedata.com";
 
-export async function getQuotes(symbols) {
+export default async function getQuotes(symbols) {
 
     const url =
         `${BASE_URL}/quote` +
