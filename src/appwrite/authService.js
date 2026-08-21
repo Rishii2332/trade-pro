@@ -1,25 +1,92 @@
-const API_KEY = import.meta.env.VITE_TWELVE_DATA_API_KEY;
+import {
+    account,
+    databases,
+    ID,
+    Query,
+    DATABASE_ID,
+    USERS_COLLECTION_ID,
+} from "./config";
 
-const BASE_URL = "https://api.twelvedata.com";
-
-export default async function getQuotes(symbols) {
-
-    const url =
-        `${BASE_URL}/quote` +
-        `?symbol=${symbols.join(",")}` +
-        `&apikey=${API_KEY}`;
-
-    const response = await fetch(url);
-
-    const data = await response.json();
-
-    if (!response.ok || data.status === "error") {
-
-        throw new Error(
-            data.message || "Failed to fetch market data"
+class AuthService {
+    async register({
+        fullName,
+        email,
+        password,
+        phoneNumber,
+        address,
+        dateOfBirth,
+    }) {
+        const user = await account.create(
+            ID.unique(),
+            email,
+            password,
+            fullName
         );
 
+        await account.createEmailPasswordSession(email, password);
+
+        const profile = {
+            fullName,
+            email,
+        };
+
+        if (phoneNumber) profile.phoneNumber = phoneNumber;
+        if (address) profile.address = address;
+        if (dateOfBirth) profile.dateOfBirth = dateOfBirth;
+
+        await databases.createDocument(
+            DATABASE_ID,
+            USERS_COLLECTION_ID,
+            user.$id,
+            profile
+        );
+
+        return user;
     }
 
-    return data;
+    async login(email, password) {
+        return account.createEmailPasswordSession(email, password);
+    }
+
+    async getCurrentUser() {
+        return account.get();
+    }
+
+    async getUserDetails(userId, email) {
+        try {
+            return await databases.getDocument(
+                DATABASE_ID,
+                USERS_COLLECTION_ID,
+                userId
+            );
+        } catch (error) {
+            if (error.code !== 404) {
+                throw error;
+            }
+        }
+
+        const queries = email
+            ? [Query.equal("email", email)]
+            : [Query.equal("userId", userId)];
+
+        try {
+            const result = await databases.listDocuments(
+                DATABASE_ID,
+                USERS_COLLECTION_ID,
+                queries
+            );
+
+            return result.documents[0] || null;
+        } catch {
+            return null;
+        }
+    }
+
+    async logout() {
+        return account.deleteSession("current");
+    }
 }
+
+const authService = new AuthService();
+
+export default authService;

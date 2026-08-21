@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { getQuote } from "../services/marketService";
+import {
+    applyTrades,
+    getFinnhubNews,
+    getFinnhubQuotes,
+} from "../services/finnhubService";
+import { finnhubSocket } from "../services/finnhubSocket";
 import {
     FaChartLine,
     FaSearch,
@@ -25,8 +30,14 @@ function Home() {
     // -----------------------------
     // Carousel
     // -----------------------------
-    const [marketData, setMarketData] = useState({});
     const [marketLoading, setMarketLoading] = useState(true);
+    const [marketError, setMarketError] = useState("");
+    const [marketIndices, setMarketIndices] = useState([]);
+    const [watchlist, setWatchlist] = useState([]);
+    const [topGainers, setTopGainers] = useState([]);
+    const [topLosers, setTopLosers] = useState([]);
+    const [news, setNews] = useState([]);
+    const [socketLive, setSocketLive] = useState(false);
     const [currentSlide, setCurrentSlide] = useState(0);
     const [user, setUser] = useState(null);
     const [userDetails, setUserDetails] = useState(null);
@@ -41,6 +52,8 @@ function Home() {
             const currentUser =
                 await authService.getCurrentUser();
 
+            setUser(currentUser);
+
             console.log(
                 "AUTH USER:",
                 currentUser
@@ -48,7 +61,8 @@ function Home() {
 
             const details =
                 await authService.getUserDetails(
-                    currentUser.$id
+                    currentUser.$id,
+                    currentUser.email
                 );
 
             console.log(
@@ -56,7 +70,12 @@ function Home() {
                 details
             );
 
-            setUserDetails(details);
+            setUserDetails(
+                details || {
+                    fullName: currentUser.name,
+                    membershipStatus: "active",
+                }
+            );
 
         } catch (error) {
 
@@ -83,19 +102,21 @@ function Home() {
 
         try {
 
-            const symbols = [
-                "RELIANCE",
-                "TCS",
-                "INFY",
-                "HDFCBANK",
-                "TATAMOTORS"
-            ];
+            setMarketError("");
 
-            const data = await getQuotes(symbols);
+            const snapshot = await getFinnhubQuotes();
 
-            console.log("MARKET DATA:", data);
+            setMarketIndices(snapshot.indices);
+            setWatchlist(snapshot.watchlist);
+            setTopGainers(snapshot.topGainers);
+            setTopLosers(snapshot.topLosers);
 
-            setMarketData(data);
+            try {
+                const articles = await getFinnhubNews();
+                setNews(articles);
+            } catch (newsError) {
+                console.error("Market news error:", newsError);
+            }
 
         } catch (error) {
 
@@ -103,6 +124,7 @@ function Home() {
                 "Market data error:",
                 error
             );
+            setMarketError(error.message || "Failed to load live market data");
 
         } finally {
 
@@ -113,6 +135,19 @@ function Home() {
     };
 
     loadMarketData();
+
+    const stopSocket = finnhubSocket.start((trades) => {
+        setSocketLive(true);
+        setWatchlist((current) => applyTrades(current, trades));
+        setMarketIndices((current) => applyTrades(current, trades));
+        setTopGainers((current) => applyTrades(current, trades));
+        setTopLosers((current) => applyTrades(current, trades));
+    });
+
+    return () => {
+        stopSocket();
+        setSocketLive(false);
+    };
 
 }, []);
     const slides = [
@@ -194,142 +229,25 @@ function Home() {
 
 }
 
+    const sharesPerStock = 10;
+    const portfolioValue = watchlist.reduce(
+        (sum, stock) => sum + stock.rawPrice * sharesPerStock,
+        0
+    );
+    const todayPnl = watchlist.reduce(
+        (sum, stock) => sum + stock.rawChange * sharesPerStock,
+        0
+    );
+    const todayPnlPercent = portfolioValue
+        ? (todayPnl / (portfolioValue - todayPnl)) * 100
+        : 0;
+    const availableBalance = portfolioValue * 0.3;
 
-    // -----------------------------
-    // Sample Market Data
-    // -----------------------------
-
-    <div className="mt-8 bg-white/5 border border-white/10 rounded-2xl p-6">
-
-    <p className="text-gray-400">
-        {reliance?.name || "Reliance Industries"}
-    </p>
-
-    <h2 className="text-3xl font-bold mt-2">
-        ₹{reliance?.close || "--"}
-    </h2>
-
-    <p
-        className={
-            Number(reliance?.percent_change) >= 0
-                ? "text-emerald-400 mt-2"
-                : "text-red-400 mt-2"
-        }
-    >
-        {reliance?.percent_change
-            ? `${reliance.percent_change}%`
-            : "--"}
-    </p>
-
-</div>
-
-    const marketIndices = [
-        {
-            name: "NIFTY 50",
-            value: "24,876.45",
-            change: "+124.35",
-            percentage: "+0.50%",
-            positive: true,
-        },
-        {
-            name: "SENSEX",
-            value: "81,698.25",
-            change: "+356.78",
-            percentage: "+0.44%",
-            positive: true,
-        },
-        {
-            name: "BANK NIFTY",
-            value: "55,432.10",
-            change: "-123.45",
-            percentage: "-0.22%",
-            positive: false,
-        },
-        {
-            name: "NIFTY IT",
-            value: "41,238.65",
-            change: "+298.12",
-            percentage: "+0.73%",
-            positive: true,
-        },
-    ];
-
-
-    const watchlist = [
-        {
-            name: "Reliance Industries",
-            symbol: "RELIANCE",
-            price: "1,428.60",
-            change: "+1.25%",
-            positive: true,
-        },
-        {
-            name: "Tata Motors",
-            symbol: "TATAMOTORS",
-            price: "734.80",
-            change: "+2.18%",
-            positive: true,
-        },
-        {
-            name: "Infosys",
-            symbol: "INFY",
-            price: "1,582.40",
-            change: "-0.84%",
-            positive: false,
-        },
-        {
-            name: "HDFC Bank",
-            symbol: "HDFCBANK",
-            price: "1,912.25",
-            change: "+0.67%",
-            positive: true,
-        },
-        {
-            name: "TCS",
-            symbol: "TCS",
-            price: "3,421.50",
-            change: "-0.42%",
-            positive: false,
-        },
-    ];
-
-
-    const topGainers = [
-        {
-            name: "Tata Motors",
-            price: "734.80",
-            change: "+5.82%",
-        },
-        {
-            name: "Adani Ports",
-            price: "1,345.20",
-            change: "+4.76%",
-        },
-        {
-            name: "BEL",
-            price: "312.45",
-            change: "+3.91%",
-        },
-    ];
-
-
-    const topLosers = [
-        {
-            name: "Infosys",
-            price: "1,582.40",
-            change: "-2.35%",
-        },
-        {
-            name: "Wipro",
-            price: "512.80",
-            change: "-1.84%",
-        },
-        {
-            name: "ITC",
-            price: "462.25",
-            change: "-1.42%",
-        },
-    ];
+    const formatUsd = (value) =>
+        Number(value || 0).toLocaleString("en-US", {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+        });
 
 
     return (
@@ -430,7 +348,23 @@ function Home() {
 
             <div className="border-b border-white/10 bg-black/20">
 
+                {marketError && (
+                    <p className="max-w-7xl mx-auto px-6 py-2 text-sm text-red-400">
+                        {marketError}
+                    </p>
+                )}
+
                 <div className="max-w-7xl mx-auto px-6 py-3 flex gap-8 overflow-x-auto">
+
+                    <span className={`text-xs font-semibold whitespace-nowrap ${socketLive ? "text-emerald-400" : "text-gray-500"}`}>
+                        {socketLive ? "LIVE" : "CONNECTING"}
+                    </span>
+
+                    {marketLoading && (
+                        <span className="text-sm text-gray-400">
+                            Loading Finnhub quotes...
+                        </span>
+                    )}
 
                     {marketIndices.map((market) => (
 
@@ -564,7 +498,7 @@ function Home() {
                             </p>
 
                             <h2 className="text-3xl font-bold mt-2">
-                                ₹1,24,580.50
+                                ${formatUsd(portfolioValue)}
                             </h2>
 
                         </div>
@@ -578,8 +512,8 @@ function Home() {
                                     Today's P&L
                                 </p>
 
-                                <p className="text-emerald-400 font-semibold mt-1">
-                                    +₹2,450.25 (+1.99%)
+                                <p className={`${todayPnl >= 0 ? "text-emerald-400" : "text-red-400"} font-semibold mt-1`}>
+                                    {todayPnl >= 0 ? "+" : "-"}${formatUsd(Math.abs(todayPnl))} ({todayPnlPercent >= 0 ? "+" : ""}{todayPnlPercent.toFixed(2)}%)
                                 </p>
 
                             </div>
@@ -588,11 +522,11 @@ function Home() {
                             <div>
 
                                 <p className="text-gray-500 text-sm">
-                                    Overall P&L
+                                    Live holdings
                                 </p>
 
-                                <p className="text-emerald-400 font-semibold mt-1">
-                                    +₹14,580.50 (+13.26%)
+                                <p className="text-gray-300 font-semibold mt-1">
+                                    10 shares × {watchlist.length || 0} active tickers
                                 </p>
 
                             </div>
@@ -611,7 +545,7 @@ function Home() {
                         </p>
 
                         <h2 className="text-3xl font-bold mt-2">
-                            ₹45,820.00
+                            ${formatUsd(availableBalance)}
                         </h2>
 
                         <button className="mt-6 w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 transition font-semibold">
@@ -648,7 +582,7 @@ function Home() {
                                     <div className="flex justify-between items-center mb-5">
 
                                         <h2 className="text-2xl font-bold">
-                                            Market Overview
+                                            Live US stocks
                                         </h2>
 
                                         <button className="text-indigo-400 text-sm">
@@ -659,6 +593,12 @@ function Home() {
 
 
                                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+
+                                        {!marketLoading && marketIndices.length === 0 && (
+                                            <p className="text-gray-500">
+                                                Live quotes unavailable right now.
+                                            </p>
+                                        )}
 
                                         {marketIndices.map((market) => (
 
@@ -734,6 +674,12 @@ function Home() {
 
                         <div className="rounded-2xl border border-white/10 overflow-hidden">
 
+                            {marketLoading && (
+                                <p className="p-5 text-gray-500">
+                                    Fetching live quotes...
+                                </p>
+                            )}
+
                             {watchlist.map((stock) => (
 
                                 <div
@@ -763,7 +709,7 @@ function Home() {
                                     <div className="text-right">
 
                                         <p className="font-semibold">
-                                            ₹{stock.price}
+                                            ${stock.price}
                                         </p>
 
                                         <p
@@ -773,7 +719,7 @@ function Home() {
                                                     : "text-red-400 text-sm"
                                             }
                                         >
-                                            {stock.change}
+                                            {stock.percentage}
                                         </p>
 
                                     </div>
@@ -802,6 +748,12 @@ function Home() {
                                 Top Gainers
                             </h3>
 
+                            {marketLoading && (
+                                <p className="text-gray-500 mb-4">
+                                    Fetching movers...
+                                </p>
+                            )}
+
                             {topGainers.map((stock) => (
 
                                 <div
@@ -816,13 +768,13 @@ function Home() {
                                         </p>
 
                                         <p className="text-sm text-gray-500">
-                                            ₹{stock.price}
+                                            ${stock.price}
                                         </p>
 
                                     </div>
 
                                     <span className="text-emerald-400">
-                                        {stock.change}
+                                        {stock.percentage}
                                     </span>
 
                                 </div>
@@ -848,13 +800,13 @@ function Home() {
                                         </p>
 
                                         <p className="text-sm text-gray-500">
-                                            ₹{stock.price}
+                                            ${stock.price}
                                         </p>
 
                                     </div>
 
                                     <span className="text-red-400">
-                                        {stock.change}
+                                        {stock.percentage}
                                     </span>
 
                                 </div>
@@ -949,55 +901,37 @@ function Home() {
 
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
 
-                        <article className="bg-white/5 border border-white/10 rounded-2xl p-5 hover:bg-white/10 transition">
+                        {news.length === 0 && (
+                            <p className="text-gray-500">
+                                Live headlines will appear here when Alpha Vantage news is available.
+                            </p>
+                        )}
 
-                            <span className="text-xs text-indigo-400">
-                                MARKET
+                        {news.map((article) => (
+
+                        <a
+                            key={article.url}
+                            href={article.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="bg-white/5 border border-white/10 rounded-2xl p-5 hover:bg-white/10 transition"
+                        >
+
+                            <span className="text-xs text-indigo-400 uppercase">
+                                {article.topic}
                             </span>
 
                             <h3 className="font-semibold text-lg mt-3">
-                                Indian markets open higher amid positive global cues
+                                {article.title}
                             </h3>
 
-                            <p className="text-gray-500 text-sm mt-3">
-                                Nifty and Sensex started the session with gains as investors tracked global market movements.
+                            <p className="text-gray-500 text-sm mt-3 line-clamp-3">
+                                {article.summary}
                             </p>
 
-                        </article>
+                        </a>
 
-
-                        <article className="bg-white/5 border border-white/10 rounded-2xl p-5 hover:bg-white/10 transition">
-
-                            <span className="text-xs text-indigo-400">
-                                TECHNOLOGY
-                            </span>
-
-                            <h3 className="font-semibold text-lg mt-3">
-                                IT stocks remain in focus this week
-                            </h3>
-
-                            <p className="text-gray-500 text-sm mt-3">
-                                Technology companies remain closely watched as investors evaluate upcoming earnings.
-                            </p>
-
-                        </article>
-
-
-                        <article className="bg-white/5 border border-white/10 rounded-2xl p-5 hover:bg-white/10 transition">
-
-                            <span className="text-xs text-indigo-400">
-                                INVESTING
-                            </span>
-
-                            <h3 className="font-semibold text-lg mt-3">
-                                Investors focus on long-term opportunities
-                            </h3>
-
-                            <p className="text-gray-500 text-sm mt-3">
-                                Market participants continue to monitor valuations and long-term growth opportunities.
-                            </p>
-
-                        </article>
+                        ))}
 
                     </div>
 
