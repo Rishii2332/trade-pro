@@ -28,6 +28,18 @@ function authHeaders() {
 
 // amount in INR (rupees)
 export async function payWithRazorpay({ amount, user, onSuccess, onFailure }) {
+    // If the public Razorpay key id isn't configured on the frontend, we can't
+    // open the checkout popup. Fall back to demo credit so the UI still works,
+    // and tell the user what to fix.
+    if (!RAZORPAY_KEY_ID) {
+        await addFunds(amount);
+        onSuccess?.({ demo: true, amount });
+        onFailure?.(
+            "Razorpay key missing (VITE_RAZORPAY_KEY_ID). Added funds in demo mode. Restart the dev server after editing .env."
+        );
+        return;
+    }
+
     const loaded = await loadRazorpayScript();
     if (!loaded) {
         onFailure?.("Failed to load Razorpay. Check your connection.");
